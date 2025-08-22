@@ -4,19 +4,49 @@ import os
 import glob
 import mrcfile
 import numpy as np
+import pandas as pd
 from slabify import slabify
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
+from calculate_contrast import run_contrast_calculations
 
 INPUT_DIR = r"..\..\datasets\membrain-seg-rat-synapse\raw_tomos"
-
-results = {}
+OUTPUT_DIR = r""
+SHOW_INDIVIDUAL_PLOTS = True
+MAX_THICKNESS_IN_PLOTS_NM = 500
+SAVE_JSON_RESULTS = True
 
 tomo_paths = glob.glob(os.path.join(INPUT_DIR, "*.rec")) + glob.glob(
     os.path.join(INPUT_DIR, "*.mrc")
 )
 
-for tomo_path in tomo_paths:
+n_subplot_rows = len(tomo_paths) + 1 if SHOW_INDIVIDUAL_PLOTS else 1
+fig = make_subplots(
+    rows=n_subplot_rows,
+    cols=2,
+    horizontal_spacing=0.2,
+    specs=[[{"colspan": 2}, None]] + [[{}, {}]] * (n_subplot_rows - 1),
+    subplot_titles=["Thickness Summary"]
+    + ["Thickness Map", "Thickness Distribution"] * (n_subplot_rows - 1),
+)
+
+results = pd.DataFrame(
+    index=range(len(tomo_paths)),
+    columns=[
+        "tomo_name",
+        "min",
+        "max",
+        "median",
+        "mean",
+        "std",
+        "rms_contrast",
+        "michelson_contrast",
+        "thickness_map",
+        "flattened_values",
+    ],
+)
+
+for i, tomo_path in enumerate(tomo_paths):
     tomo_name = os.path.splitext(os.path.basename(tomo_path))[0]
 
     with mrcfile.open(tomo_path, permissive=True) as inmrc:
@@ -38,64 +68,86 @@ for tomo_path in tomo_paths:
         percentile=95,
         seed=4056,
     )
-
     z_projection = np.sum(bmask, axis=0) * angpix / 10
-    flattened_values = z_projection.flatten()
+    rms_contrast, michelson_contrast = run_contrast_calculations(tomo, tomo_name)
 
-    results[tomo_name] = {
-        "tomo name": tomo_name,
-        "bmask": bmask,
-        "thickness map": z_projection,
-        "flattened values": flattened_values,
-        "shape": z_projection.shape,
-        "min": np.min(z_projection),
-        "max": np.max(z_projection),
-        "mean": round(np.mean(z_projection), 2),
-        "std": round(np.std(z_projection), 2),
+    tomo_statistics = {
+        "tomo_name": tomo_name,
+        "thickness_map": z_projection,
+        "flattened_values": z_projection.flatten(),
+        "rms_contrast": rms_contrast,
+        "michelson_contrast": michelson_contrast,
+        "min": z_projection.min(),
+        "max": z_projection.max(),
+        "mean": z_projection.mean(),
+        "median": np.median(z_projection),
+        "std": z_projection.std(),
     }
 
-fig = make_subplots(
-    rows=len(results),
-    cols=2,
-    subplot_titles=("Z-Projection", "Value Distribution"),
-    horizontal_spacing=0.2,
-)
+    for col, value in tomo_statistics.items():
+        results.loc[i, col] = value
 
-for i, (tomo_name, metrics) in enumerate(results.items(), start=1):
-
+    if not SHOW_INDIVIDUAL_PLOTS:
+        continue
+    subplot_row = i + 2  # start on row 2
     fig.add_trace(
         go.Heatmap(
-            z=metrics["thickness map"],
+            z=tomo_statistics["thickness_map"],
             zmin=0,
-            zmax=450,
+            zmax=MAX_THICKNESS_IN_PLOTS_NM,
             colorscale="viridis",
-            colorbar=dict(
-                x=0.45,  # Position colorbar between the two subplots
-                len=0.9,  # Length of colorbar
-                thickness=10,  # Thickness of colorbar
-            ),
+            colorbar={
+                "x": 0.45,  # Position colorbar between the two subplots
+                "y": 0.5,  # XXX
+                "len": 0.9 / n_subplot_rows,  # Length of colorbar
+                "thickness": 10,
+            },
         ),
-        row=i,
+        row=subplot_row,
         col=1,
     )
-    fig.update_xaxes(title_text="X", row=i, col=1)
-    fig.update_yaxes(title_text="Y", row=i, col=1)
+    fig.update_xaxes(title_text="X", row=subplot_row, col=1)
+    fig.update_yaxes(title_text="Y", row=subplot_row, col=1)
 
     fig.add_trace(
         go.Violin(
-            y=metrics["flattened values"],
+            y=tomo_statistics["thickness_map"][0].flatten(),
             name=tomo_name,
             box_visible=True,
+            showlegend=False,
         ),
-        row=i,
+        row=subplot_row,
         col=2,
     )
-    fig.update_xaxes(title_text="", row=i, col=2)
-    fig.update_yaxes(title_text="Thickness (nm)", range=[100, 400], row=i, col=2)
-
-    fig.update_layout(
-        title="Tomo Thickness Analysis", height=300 * len(results), showlegend=False
+    fig.update_xaxes(title_text="", row=subplot_row, col=2)
+    fig.update_yaxes(
+        title_text="Thickness (nm)",
+        range=[100, MAX_THICKNESS_IN_PLOTS_NM],
+        row=subplot_row,
+        col=2,
     )
 
-print(results)
+if SAVE_JSON_RESULTS:
+    results.to_json(os.path.join(OUTPUT_DIR, "tomo_thickness.json"), indent=2)
+
+# Summary plot on row 1
+fig.add_trace(
+    go.Bar(
+        x=results["tomo_name"],
+        y=results["mean"].values,
+        error_y={"type": "data", "array": results["std"].values},
+        showlegend=False,
+    ),
+    row=1,
+    col=1,
+)
+fig.update_xaxes(title_text="", row=1, col=2)
+fig.update_yaxes(title_text="Mean Thickness (nm)", row=1, col=2)
+
+fig.update_layout(
+    title="Tomo Thickness Analysis",
+    height=300 * n_subplot_rows,
+    width=1000,
+)
+
 fig.show()
