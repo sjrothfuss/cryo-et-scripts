@@ -38,15 +38,21 @@ def _michelson_contrast(tomo: np.ndarray) -> float:
     return (max_i - min_i) / (max_i + min_i)
 
 
-def calculate_contrast(tomo_path: str) -> dict:
-    "Calculate and print the contrast of a tomogram."
-    tomo = _open_tomo(tomo_path)
-    tomo_name = os.path.basename(tomo_path)
+def run_contrast_calculations(tomo: np.ndarray, tomo_name: str) -> tuple:
+    """Return the RMS and Michelson contrast of an array."""
     rms_contrast = _rms_contrast(tomo)
     michelson_contrast = _michelson_contrast(tomo)
+    print(f"Tomogram: {tomo_name}")
     print(f"RMS Contrast: {rms_contrast:.3f}")
     print(f"Michelson Contrast: {michelson_contrast:.3f}")
-    return {tomo_name: (rms_contrast, michelson_contrast)}
+    return (rms_contrast, michelson_contrast)
+
+
+def open_and_calculate_contrast(tomo_path: str) -> dict:
+    "Open tomo and return the contrast."
+    tomo = _open_tomo(tomo_path)
+    tomo_name = os.path.basename(tomo_path)
+    return {tomo_name: run_contrast_calculations(tomo, tomo_name)}
 
 
 def cli():
@@ -61,7 +67,7 @@ def cli():
     )
     parser.add_argument("tomo_path", help="Tomogram path")
     args = parser.parse_args()
-    calculate_contrast(args.tomo_path)
+    open_and_calculate_contrast(args.tomo_path)
 
 
 if __name__ == "__main__":
