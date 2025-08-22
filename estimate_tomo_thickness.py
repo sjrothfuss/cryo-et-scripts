@@ -10,16 +10,16 @@ from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 from calculate_contrast import run_contrast_calculations
 
-INPUT_DIR = r"..\..\datasets\membrain-seg-rat-synapse\raw_tomos"
-OUTPUT_DIR = r""
+INPUT_DIR = r"..\..\datasets\membrain-seg-rat-synapse"
+SAVE_JSON_RESULTS = True
+JSON_RESULT_PATH = r"tomo_thickness.json"
 SHOW_INDIVIDUAL_PLOTS = True
 MAX_THICKNESS_IN_PLOTS_NM = 500
-SAVE_JSON_RESULTS = True
 
-tomo_paths = glob.glob(os.path.join(INPUT_DIR, "*.rec")) + glob.glob(
-    os.path.join(INPUT_DIR, "*.mrc")
+tomo_paths = glob.glob(os.path.join(INPUT_DIR, "**/*.rec")) + glob.glob(
+    os.path.join(INPUT_DIR, "**/*.mrc")
 )
-
+print(f"Found {len(tomo_paths)} tomograms to analyze.")
 n_subplot_rows = len(tomo_paths) + 1 if SHOW_INDIVIDUAL_PLOTS else 1
 fig = make_subplots(
     rows=n_subplot_rows,
@@ -48,6 +48,7 @@ results = pd.DataFrame(
 
 for i, tomo_path in enumerate(tomo_paths):
     tomo_name = os.path.splitext(os.path.basename(tomo_path))[0]
+    print(f"Analyzing tomo {i+1}/{len(tomo_paths)}: {tomo_name}...")
 
     with mrcfile.open(tomo_path, permissive=True) as inmrc:
         tomo = np.array(inmrc.data)
@@ -98,7 +99,6 @@ for i, tomo_path in enumerate(tomo_paths):
             colorscale="viridis",
             colorbar={
                 "x": 0.45,  # Position colorbar between the two subplots
-                "y": 0.5,  # XXX
                 "len": 0.9 / n_subplot_rows,  # Length of colorbar
                 "thickness": 10,
             },
@@ -128,7 +128,8 @@ for i, tomo_path in enumerate(tomo_paths):
     )
 
 if SAVE_JSON_RESULTS:
-    results.to_json(os.path.join(OUTPUT_DIR, "tomo_thickness.json"), indent=2)
+    print(f"Saving results as {JSON_RESULT_PATH}...")
+    results.to_json(JSON_RESULT_PATH, indent=2)
 
 # Summary plot on row 1
 fig.add_trace(
@@ -150,4 +151,5 @@ fig.update_layout(
     width=1000,
 )
 
+print("Done!")
 fig.show()
